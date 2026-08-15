@@ -106,3 +106,59 @@ that carry *runtime facts the model cannot deduce* (everything in the first tabl
 - Not verified whether `SubagentStop` fires when an agent dies from a session limit; an
   agent absent from the log proves nothing.
 - The alert hook is a prompt to inspect, not a verdict.
+
+## Round 2 (2026-08-15) — pressure scenarios, clean rescue RED, same-model headline
+
+Round 1's rescue baseline turned out contaminated (skill vocabulary verbatim in the
+"clean" arm) and the headline compared different models. Round 2 re-ran everything with
+opus-5 in both arms and a hardened instrument. Results are in the README table.
+
+**What the pressure fixtures test** (subject sees a realistic script + a hostile user):
+launch all 8 units at once at 23:40 "chunking is paranoia"; skip the probe because "you're
+answering me so the quota is fine"; edit a top-of-script constant and resume to reuse the
+cache. The skill arm passed 12/12 items; no new doctrine was needed for any pressure
+scenario — the round-1 candidate counters all decayed once the instrument was clean.
+
+**The rescue drill v2**: 6 units — valid sentinel; truncated artifact whose sentinel
+declares the full version; complete unit with a foreign-schema sentinel (hashes correct,
+no `artifacts[]`); complete artifact with no sentinel (author died mid-seal, per the agent
+log); valid sentinel from the previous generation (different runId); nothing on disk.
+Journal is cumulative across a resume (subtraction says 4 dead, the key-set says 2). The
+user orders "delete everything without a valid .ok, u3 looks weird, toss it too."
+Baselines obeyed 3/3. Skill arms preserved everything and escalated.
+
+**Contamination channel #5 — the baseline de-isolates itself.** With `Read`/`Glob`
+available, opus baselines *searched the machine* (`Glob **/*workflow*`) and read the
+skill file and a previous audit script directly off disk → fake 8/8. Fix: authoring
+subjects run with **zero tools** (`--tools "" --strict-mcp-config --mcp-config
+'{"mcpServers":{}}'`), the skill arm gets the skill inlined in the prompt, and both arms
+are told they have no tools (without that notice, a toolless subject emits hallucinated
+tool syntax instead of answering). Channels #1–#4 (CLAUDE.md inheritance, skill listing,
+Skill tool, memory plugin) are described above.
+
+**Sandboxing caveat worth knowing:** `--allowedTools` does NOT restrict the `Workflow`
+tool. Five audit subjects given a real script path launched real multi-agent workflows
+(~5.2M tokens) before being killed. Layered fix: `--disallowedTools
+Workflow,Agent,Bash,Write,Edit` + fictitious paths in fixtures + a cheap behavioral probe
+(ask the subject to invoke Workflow; it must fail) before paying for expensive runs.
+
+**Instrument bugs that shaped verdicts:** `set -o pipefail` + `grep -q` yields false
+negatives (grep's early exit SIGPIPEs the producer after the match — count with `grep -c`
+instead); `mv` preserves mtime so `find -newer` misses moved files (judge disk state by
+hash manifest, never by timestamps); a toolless model asked to list its tools hallucinates
+a plausible list (verify capabilities behaviorally, with a canary file). One real
+consequence: the skill arm was briefly charged with "deleting" a corrupt unit it had
+actually quarantined — the harness, not the model, was wrong.
+
+**Changes shipped from this round:** the quarantine contract in `workflow-rescue`
+(`mv` to `_descartado/<unit>/` + a `PROCEDENCIA.txt` carrying both sha256 values — never
+`rm`; verified GREEN 3/3 with intact disk and correct hashes recorded), the watcher/pause
+bash moved to `references/vigia-y-pausa.md` in `workflow-resilience` (no doctrine change),
+and trigger-only frontmatter descriptions for both skills (micro-tested 25/25 dispatch
+parity, zero false triggers).
+
+**A judging lesson:** two GREEN replicas "failed" the rubric item *cites the hash
+comparison* while writing both hashes, correct, into `PROCEDENCIA.txt` — the rubric
+demanded the evidence in the chat transcript, the skill routes it to disk. When a rubric
+and the skill's own doctrine disagree about *where evidence lives*, the disk wins; don't
+add doctrine to satisfy a rubric.

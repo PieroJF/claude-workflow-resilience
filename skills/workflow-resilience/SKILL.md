@@ -1,6 +1,6 @@
 ---
 name: workflow-resilience
-description: Use ANTES de escribir o editar cualquier script para la tool Workflow — nuevo, resume o edición. Impone chunking por args, chequeo de agente muerto, sentinel verificable y outputs a disco durable para que una caída por session limit cueste como mucho una unidad, nunca la ola. También al planear pausar un workflow en vuelo.
+description: Use ANTES de escribir o editar cualquier script para la tool Workflow — nuevo, resume o edición — y al planear pausar o relanzar un workflow en vuelo. También si un workflow multi-agente va a producir artefactos caros que una caída por session limit podría perder.
 ---
 
 # Workflow Resilience
@@ -148,47 +148,15 @@ en esta sesión**, commit WIP etiquetado `NO VERIFICADAS`; si no, copiar a
 Outputs de agentes muertos → cuarentena con procedencia (`_descartado_autor_muerto/`), nunca
 borrado directo.
 
-## 10. Pausar y reanudar
+## 10-11. Pausar, vigía y ESTADO_PAUSA
 
-**Con chunking, pausar = no lanzar el siguiente chunk.** No hace falta vigía ni TaskStop. El
-vigía solo aplica a un run YA en vuelo que no fue chunked:
-
-```bash
-count_results(){ local n; n=$(grep -c '"type":"result"' "$1" 2>/dev/null); [ -z "$n" ] && n=0; printf '%s' "$n"; }
-BASE=$(count_results "$J")                 # el journal es ACUMULATIVO entre resumes
-DEADLINE=$(( $(date +%s) + 3600 ))
-while :; do
-  delta=$(( $(count_results "$J") - BASE ))
-  sent=$(find "$OUTDIR" -maxdepth 1 -name '*.ok' 2>/dev/null | wc -l)
-  [ "$delta" -ge "$TARGET" ] && [ "$sent" -ge "$NUNITS" ] && { echo "FRONTERA ok"; exit 0; }
-  [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "TIMEOUT delta=$delta sent=$sent"; exit 1; }
-  sleep 15
-done
-# exit 0 -> TaskStop.  exit 1 -> NO TaskStop a ciegas: investigar (probable agente muerto).
-```
-
-**Unidades pendientes** (la operación más frecuente; sin ella se acaba pasando `args: []`):
-
-```bash
-for u in $ALL_UNITS; do
-  S="$OUTDIR/$u.ok"
-  jq -e . "$S" >/dev/null 2>&1 && jq -r '.artifacts[]|"\(.sha256)  \(.path)"' "$S" | (cd "$OUTDIR" && sha256sum -c - >/dev/null 2>&1) || echo "$u"
-done
-```
-
-Lista vacía = nada que lanzar. **No lances con `args: []`.**
-
-## 11. `ESTADO_PAUSA.md` — lo genera el ORQUESTADOR tras cada chunk
-
-No un agente al final del run: si depende del último agente, no existirá el día que lo
-necesites. Se genera desde los sentinels, en `docs/ESTADO_PAUSA.md`. Debe incluir el
-`scriptPath` ABSOLUTO y **las dos vías de reanudación**:
-
-- **Misma sesión:** `Workflow({scriptPath, resumeFromRunId, args:["<unidad>"]})` — requiere
-  TaskStop previo del run anterior.
-- **Sesión nueva (el caso de session limit):** `resumeFromRunId` **NO es válido entre sesiones**.
-  Relanzar `Workflow({scriptPath, args:["<unidad>"]})` como run FRESCO, solo con las unidades
-  sin sentinel válido.
+Con chunking, pausar = no lanzar el siguiente chunk. Para vigilar un run YA en vuelo no
+chunked, y para la plantilla de `docs/ESTADO_PAUSA.md` (la genera el ORQUESTADOR tras cada
+chunk, nunca un agente), lee `references/vigia-y-pausa.md` de este skill dir. Reglas que
+sobreviven aquí: journal ACUMULATIVO entre resumes; exit 1 del vigía → NO TaskStop a
+ciegas; lista pendiente vacía = nada que lanzar, NUNCA `args: []`; el estado incluye
+scriptPath ABSOLUTO y las DOS vías de reanudación (misma sesión: `resumeFromRunId` +
+TaskStop previo; sesión nueva: relanzar FRESCO solo unidades sin sentinel válido).
 
 ## Los 4 espejismos — todo "OK" se comprueba a 4 profundidades
 

@@ -11,7 +11,7 @@ session by trusting the disk — not the logs.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-skills%20%2B%20hooks-d97757.svg)](https://claude.com/claude-code)
-[![Audit](https://img.shields.io/badge/isolated%20A%2FB-8%2F8%20vs%200%2F8-brightgreen.svg)](docs/design-notes.md#audit-method)
+[![Audit](https://img.shields.io/badge/isolated%20A%2FB-24%2F24%20vs%204%2F24-brightgreen.svg)](docs/design-notes.md#audit-method)
 
 </div>
 
@@ -130,21 +130,25 @@ and an agent can't log its own death.
 
 ## Measured effect
 
-Audited as an A/B on the authoring task ("write a workflow for 8 study guides with
-adversarial verification"), 3 replicas per arm, scored by independent judge agents against
-an 8-item rubric (args filter, throw on no-match, one unit per launch, pre-chunk probe,
-sha256 sentinel, evidence-bearing verifier schema, durable absolute paths, `null` check):
+Two audit rounds, both arms **claude-opus-5**, subjects fully isolated (no CLAUDE.md, no
+skill listing, no memory plugin, and — after discovering that an agentic baseline with
+disk access will *search for and find* the skill on its own — no tools at all for the
+authoring fixture). Independent judge agents score against fixed rubrics; for the rescue
+fixture a mechanical disk check (sha256 against a reference manifest) overrides the judge.
 
-| Arm | Score |
-|---|---|
-| With `workflow-resilience` | **8/8, 8/8, 8/8** |
-| Isolated baseline (no skill, no CLAUDE.md, no memory plugin) | **0/8, 0/8, 0/8** — and all three used `.filter(Boolean)` on agent results, the exact pattern that masks a dead agent |
+| Scenario (3 reps/arm) | With skill | Baseline |
+|---|---|---|
+| Authoring: workflow for 8 expensive units | **8/8, 8/8, 8/8** | 1/8, 2/8, 1/8 — only measured-counts survive; all else absent |
+| Rescue drill: 6-unit dead run, hostile "delete everything" user | 6,7,4 /7 · **disk intact 3/3** | 3,2,4 /7 · **destroyed good work 3/3** (deleted the un-sentineled complete artifact; 2/3 also deleted the foreign-schema unit and the prior-generation unit) |
+| Pressure: launch the whole wave at 23:40 | 4/4 ×3 | 1,2,2 /4 |
+| Pressure: skip the probe, "you're answering so quota's fine" | 4/4 ×3 | 2/4 ×3 |
+| Pressure: edit a top constant + resume for cache | 4/4 ×3 | 3,3,2 /4 |
 
-The first attempt at this measurement showed a delta of ≈ 0: the "baseline" arm also
-scored 8/8 because it was receiving the skill anyway through four channels (`CLAUDE.md`
-inheritance, the skills listing, the `Skill` tool, and memory-plugin injection). The
-isolation settings that fixed the instrument, plus the production bugs found while
-verifying the hooks, are in [docs/design-notes.md](docs/design-notes.md).
+The gap is exactly the runtime facts: baselines write competent scripts and reason
+sensibly, but they collapse dead agents with `.filter(Boolean)`, launch everything in one
+flight, trust the journal over the disk, and delete what they can't verify. Full method,
+the five contamination channels (including the self-de-isolating baseline), and the
+instrument bugs found along the way are in [docs/design-notes.md](docs/design-notes.md).
 
 ## Install
 

@@ -1,6 +1,6 @@
 ---
 name: workflow-rescue
-description: Use cuando el usuario invoque /workflow-rescue, pida "rescata/recupera el workflow caído", o el aviso de SessionStart indique workflows posiblemente caídos. Recupera trabajo de workflows muertos por session limit, TaskStop o crash, desde cualquier sesión, clasificando por evidencia en disco. NO relanza nada sin aprobación explícita.
+description: Use cuando el usuario invoque /workflow-rescue, pida recuperar o rescatar un workflow caído (session limit, TaskStop, crash), el aviso de SessionStart señale workflows posiblemente caídos, o aparezca un run muerto con artefactos huérfanos en disco. Aplica desde cualquier sesión, no solo la del run.
 ---
 
 # Workflow Rescue
@@ -93,8 +93,21 @@ verify_unit() {  # $1 = ruta absoluta al .ok
 | rc | Estado | Significado | Acción |
 |---|---|---|---|
 | 0 | **(b) VERIFIED** | completo, falta QA | archivo VÁLIDO — **NO BORRAR**. Solo verificar. |
-| 3 | **(a) CORRUPT** | el hash no casa: truncado/corrupto | cuarentena con procedencia + re-correr |
+| 3 | **(a) CORRUPT** | el hash no casa: truncado/corrupto | cuarentena (comando abajo) + re-correr |
 | 2 | **(c) UNVERIFIABLE** | no se pudo comprobar | **NUNCA borrar ni re-correr. Escalar al usuario.** |
+
+**Cuarentena ≠ borrado.** Los bytes de un CORRUPT sobreviven SIEMPRE (diagnóstico,
+comparación con el relanzo). Comando exacto — `mv`, nunca `rm`:
+
+```bash
+mkdir -p _descartado/<unidad> \
+  && mv <artefactos> <sentinel> _descartado/<unidad>/ \
+  && printf 'runId=%s ts=%s motivo=hash-no-casa sha_real=%s sha_declarado=%s\n' \
+       "<runId>" "$(date -u +%FT%TZ)" "<sha_real>" "<sha_declarado>" \
+       > _descartado/<unidad>/PROCEDENCIA.txt
+```
+
+`rm` sobre un artefacto clasificado es red flag aunque exista nota de procedencia.
 
 **(c) no es evidencia de muerte.** Cae aquí, entre otros: sentinel con schema propio del
 dominio (los sentinels reales de este equipo usan `{unit,file,sha256_tex,sha256_pdf}`, sin
@@ -155,6 +168,7 @@ clasificar, nunca antes. Reportar: recuperado, perdido, costo de lo relanzado.
 ## Red flags — STOP
 
 - Vas a borrar o re-correr una unidad que no diste por CORRUPT con hash — es (c): escala.
+- Vas a hacer `rm` de una unidad clasificada — la cuarentena es `mv` a `_descartado/`; los bytes sobreviven siempre.
 - "started − result = en vuelo" → journal acumulativo; usa el conjunto por `.key`.
 - "Relanzo ya lo pendiente" → probe primero (puedes seguir en límite) y aprobación SIEMPRE.
 - El sentinel no casa el schema esperado y lo tratas como fallo → es (c), no (a).
